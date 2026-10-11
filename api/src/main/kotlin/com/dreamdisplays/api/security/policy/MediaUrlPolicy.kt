@@ -3,6 +3,7 @@ package com.dreamdisplays.api.security.policy
 import com.dreamdisplays.api.Unstable
 import com.dreamdisplays.api.media.search.model.YouTubeVideoId
 import com.dreamdisplays.api.security.model.LanguageTag
+import com.dreamdisplays.api.security.model.MediaFtpUrl
 import com.dreamdisplays.api.security.model.MediaHttpUrl
 
 /**
@@ -31,7 +32,8 @@ object MediaUrlPolicy {
 
     /**
      * A bare 11-character YouTube id (which may legitimately start with `-`), or a trimmed
-     * `http://` or `https://` URL with no whitespace or control characters, within [MAX_URL_LENGTH].
+     * `http://`, `https://` or `ftp://` URL with no whitespace or control characters, within [MAX_URL_LENGTH].
+     * An `ftp://` URL is held to [MediaFtpUrl]'s stricter rules (no query, no control characters once decoded).
      */
     fun isAllowed(url: String): Boolean {
         if (url.isEmpty()) return true
@@ -40,6 +42,6 @@ object MediaUrlPolicy {
         if (s.isEmpty()) return false
         if (s.length > MAX_URL_LENGTH) return false
         if (YouTubeVideoId.parse(s) != null) return true
-        return MediaHttpUrl.isValid(s, MAX_URL_LENGTH)
+        return MediaHttpUrl.isValid(s, MAX_URL_LENGTH) || MediaFtpUrl.isValid(s, MAX_URL_LENGTH)
     }
 }

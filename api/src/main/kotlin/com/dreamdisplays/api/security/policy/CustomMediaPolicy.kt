@@ -5,6 +5,7 @@ package com.dreamdisplays.api.security.policy
 import com.dreamdisplays.api.Unstable
 import com.dreamdisplays.api.media.source.model.MediaPlatform
 import com.dreamdisplays.api.media.source.model.MediaSource
+import com.dreamdisplays.api.security.model.MediaFtpUrl
 import com.dreamdisplays.api.security.model.MediaHttpUrl
 import java.util.*
 
@@ -66,7 +67,7 @@ object CustomMediaPolicy {
         if (!isCustom(url)) return Verdict.ALLOWED
         if (!settings.enabled) return Verdict.DISABLED
 
-        val host = MediaHttpUrl.parse(url)?.uri?.host?.lowercase(Locale.ROOT)
+        val host = (MediaHttpUrl.parse(url)?.uri ?: MediaFtpUrl.parse(url)?.uri)?.host?.lowercase(Locale.ROOT)
             ?: return Verdict.MALFORMED
         if (settings.blockedHosts.any { matches(host, it) }) return Verdict.HOST_BLOCKED
         if (settings.allowedHosts.isNotEmpty() && settings.allowedHosts.none { matches(host, it) }) {

@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.player.process
 
+import com.dreamdisplays.api.security.model.MediaFtpUrl
 import com.dreamdisplays.api.security.policy.MediaHosts
 import com.dreamdisplays.media.player.pipeline.VideoFramePipe
 import com.dreamdisplays.media.runtime.security.MediaHostGuard
@@ -207,11 +208,21 @@ object MediaProcess {
         seekByDecoding: Boolean,
         trimmed: HlsSeekPlaylist.Trimmed?,
     ): MutableList<String> {
+        val isFtp = MediaFtpUrl.isFtp(safeUrl)
+        // FFmpeg's ftp protocol does not decode the path, so it gets the decoded form; everything
+        // else is passed through untouched.
+        val input = MediaFtpUrl.ffmpegInput(safeUrl)
         return mutableListOf<String>().apply {
             add(ffmpeg)
             addAll(listOf("-hide_banner", "-loglevel", "error", "-nostats"))
-            // TODO: httpproxy is sus
-            addAll(listOf("-protocol_whitelist", "https,tls,tcp,crypto,data,http,httpproxy"))
+            if (isFtp) {
+                // An ftp input needs nothing but ftp and tcp; keeping the list that short means a
+                // hostile server cannot make FFmpeg hop onto any other protocol.
+                addAll(listOf("-protocol_whitelist", "ftp,tcp"))
+            } else {
+                // TODO: httpproxy is sus
+                addAll(listOf("-protocol_whitelist", "https,tls,tcp,crypto,data,http,httpproxy"))
+            }
             // https://github.com/arnodoelinger/dreamdisplays/issues/218
             // TODO: i should rewrite some parts of code to fix tls issue properly but i'm too lazy
             // https://github.com/arnodoelinger/dreamdisplays/issues/209
@@ -223,7 +234,8 @@ object MediaProcess {
             }
             hwAccel.hwOutputFormat?.let { addAll(listOf("-hwaccel_output_format", it)) }
             if (trimmed == null) {
-                addHttpOptions(safeUrl)
+                // The reconnect / header options belong to the http protocol; ftp has none of them.
+                if (!isFtp) addHttpOptions(safeUrl)
             } else {
                 // Every option below belongs to the http protocol, and the input here is a data:
                 // URI, so none of them has a context to be applied to: FFmpeg reports the first one
@@ -249,13 +261,13 @@ object MediaProcess {
                 // -ss after -i makes FFmpeg decode from the start and discard: always correct,
                 // and slower the deeper the seek. Only reached when the playlist could not be read.
                 seekByDecoding -> {
-                    addAll(listOf("-i", safeUrl))
+                    addAll(listOf("-i", input))
                     if (offsetNanos > 0) addAll(seekArgs(offsetNanos))
                 }
                 // -ss before -i asks the demuxer to jump, which is what makes a seek instant
                 else -> {
                     if (offsetNanos > 0) addAll(seekArgs(offsetNanos))
-                    addAll(listOf("-i", safeUrl))
+                    addAll(listOf("-i", input))
                 }
             }
         }

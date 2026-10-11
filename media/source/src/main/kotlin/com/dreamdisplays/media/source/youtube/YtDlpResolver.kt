@@ -5,6 +5,7 @@ import com.dreamdisplays.api.media.source.model.MediaSource
 import com.dreamdisplays.api.media.source.model.ResolvedMedia
 import com.dreamdisplays.api.media.source.service.MediaResolverService
 import com.dreamdisplays.api.media.source.service.MediaResolverRegistry
+import com.dreamdisplays.api.security.model.MediaFtpUrl
 import kotlin.time.Duration.Companion.nanoseconds
 
 /**
@@ -16,8 +17,9 @@ object YtDlpResolver : MediaResolverService {
     /** Below [NewPipeResolver] (10) so the in-process path is always tried first. */
     override val priority: Int = 0
 
-    /** Any source with a resolvable URL is delegated to `yt-dlp`. */
-    override fun canResolve(source: MediaSource): Boolean = true
+    /** Any source with a resolvable URL is delegated to `yt-dlp`, except `ftp://`, which only the direct resolver serves. */
+    override fun canResolve(source: MediaSource): Boolean =
+        source.toResolvableUrl()?.let { !MediaFtpUrl.isFtp(it) } ?: true
 
     /** Pre-warms the `yt-dlp` format cache for [source] on a background thread. */
     override fun prefetch(source: MediaSource): Boolean {

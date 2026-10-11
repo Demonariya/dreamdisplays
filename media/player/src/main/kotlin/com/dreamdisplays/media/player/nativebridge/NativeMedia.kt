@@ -2,6 +2,7 @@
 
 package com.dreamdisplays.media.player.nativebridge
 
+import com.dreamdisplays.api.security.model.MediaFtpUrl
 import com.dreamdisplays.util.OsInfo
 import org.slf4j.LoggerFactory
 import java.io.File
@@ -197,7 +198,8 @@ object NativeMedia {
 
     /** Opens in-process decode session (returns opaque handle, or 0 on failure) */
     fun lavOpen(url: String, w: Int, h: Int, startMicros: Long, hwAccelCode: Int): Long {
-        val bytes = url.toByteArray(Charsets.UTF_8)
+        // FFmpeg's ftp protocol does not decode the path, so an ftp:// URL is handed over decoded.
+        val bytes = MediaFtpUrl.ffmpegInput(url).toByteArray(Charsets.UTF_8)
         Arena.ofConfined().use { arena ->
             val seg = arena.allocate(bytes.size.toLong())
             MemorySegment.copy(MemorySegment.ofArray(bytes), 0L, seg, 0L, bytes.size.toLong())

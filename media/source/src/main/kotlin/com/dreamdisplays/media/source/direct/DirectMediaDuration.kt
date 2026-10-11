@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.source.direct
 
+import com.dreamdisplays.api.security.model.MediaFtpUrl
 import com.dreamdisplays.util.net.DreamHttpClient
 import org.slf4j.LoggerFactory
 import java.nio.ByteBuffer
@@ -29,23 +30,37 @@ internal object DirectMediaDuration {
      * [extension] picks the parser; [contentLength] is only used to avoid ranging past the end.
      */
     fun probe(url: String, extension: String?, contentLength: Long?): Long? = runCatching {
-        when (extension) {
-            "mp4", "m4v", "mov", "3gp", "3g2", "mxf" -> isoBmff(url, contentLength)
-            "webm", "mkv" -> matroska(url)
-            else -> null
+        // An ftp:// source is read through one kept-open session; everything else is plain ranged GETs.
+        val ftp = if (MediaFtpUrl.isFtp(url)) FtpMediaClient.RangeReader(url) else null
+        try {
+            val ranges = Ranges { first, last -> ftp?.read(first, last) ?: if (ftp == null) httpRange(url, first, last) else null }
+            when (extension) {
+                "mp4", "m4v", "mov", "3gp", "3g2", "mxf" -> isoBmff(ranges, contentLength)
+                "webm", "mkv" -> matroska(ranges)
+                else -> null
+            }
+        } finally {
+            ftp?.close()
         }
-    }.onFailure { logger.debug("Duration probe failed for {}: {}", url.take(120), it.message) }.getOrNull()
+    }.onFailure {
+        logger.debug("Duration probe failed for {}: {}", MediaFtpUrl.redact(url).take(120), it.message)
+    }.getOrNull()
+
+    /** Where the container parsers pull bytes `first..last` (inclusive) from, whatever the protocol. */
+    private fun interface Ranges {
+        fun read(first: Long, last: Long): ByteArray?
+    }
 
     /**
      * Walks the top-level box list, hopping straight from one box header to the next, until `moov`
      * turns up. Each hop is a 16-byte ranged read, so even a non-faststart file whose `moov` sits
      * behind a multi-gigabyte `mdat` costs a couple of requests rather than a download.
      */
-    private fun isoBmff(url: String, contentLength: Long?): Long? {
+    private fun isoBmff(ranges: Ranges, contentLength: Long?): Long? {
         var offset = 0L
         repeat(MAX_BOX_HOPS) {
             if (contentLength != null && offset >= contentLength) return null
-            val header = range(url, offset, offset + 15) ?: return null
+            val header = ranges.read(offset, offset + 15) ?: return null
             if (header.size < 8) return null
 
             val buffer = ByteBuffer.wrap(header).order(ByteOrder.BIG_ENDIAN)
@@ -64,7 +79,7 @@ internal object DirectMediaDuration {
             if (size < headerSize) return null
 
             if (type == "moov") {
-                val moov = range(url, offset + headerSize, offset + headerSize + MOOV_HEAD_BYTES - 1)
+                val moov = ranges.read(offset + headerSize, offset + headerSize + MOOV_HEAD_BYTES - 1)
                     ?: return null
                 return mvhdDuration(moov)
             }
@@ -123,8 +138,8 @@ internal object DirectMediaDuration {
      * `TimecodeScale` units) out of it. Muxers put `Info` right after the segment header, well
      * inside [MATROSKA_HEAD_BYTES], because a player needs it before the first frame too.
      */
-    private fun matroska(url: String): Long? {
-        val head = range(url, 0, MATROSKA_HEAD_BYTES - 1L) ?: return null
+    private fun matroska(ranges: Ranges): Long? {
+        val head = ranges.read(0, MATROSKA_HEAD_BYTES - 1L) ?: return null
         val infoAt = indexOf(head, byteArrayOf(0x15, 0x49.toByte(), 0xA9.toByte(), 0x66)) ?: return null
 
         var cursor = infoAt + 4
@@ -208,7 +223,7 @@ internal object DirectMediaDuration {
      * Fetches bytes [first]..[last] of [url], or null when the server would not serve the range. The read is hard-capped
      * to the requested window size.
      */
-    private fun range(url: String, first: Long, last: Long): ByteArray? = runCatching {
+    private fun httpRange(url: String, first: Long, last: Long): ByteArray? = runCatching {
         val window = (last - first + 1).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         if (window <= 0) return@runCatching null
         val response = DreamHttpClient.executeLimited(

@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.source.direct
 
+import com.dreamdisplays.api.security.model.MediaFtpUrl
 import com.dreamdisplays.util.net.DreamHttpClient
 import org.slf4j.LoggerFactory
 import java.net.URLDecoder
@@ -57,6 +58,8 @@ internal object DirectMediaProbe {
      * caller decides whether to refuse or fall through to the extractor chain.
      */
     fun probe(url: String, requireBytes: Boolean = false): Result? {
+        // FTP has no HEAD / ranged GET; it gets its own tiny client (see FtpMediaClient).
+        if (MediaFtpUrl.isFtp(url)) return FtpMediaClient.probe(url)
         head(url)?.takeIf { it.contentType != null || it.contentLength != null }?.let { base ->
             // A HEAD carries no body. Sniff when the declared type is not media or too generic to
             // tell a playlist from a file, and whenever the caller wants the container proven

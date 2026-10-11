@@ -36,6 +36,14 @@ pub const NO_PTS_NANOS: i64 = i64::MIN;
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
                           (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+/// Protocols an `ftp://` input may use: the ftp protocol itself and its tcp transport, nothing else.
+const PROTOCOL_WHITELIST_FTP: &str = "ftp,tcp";
+
+/// True for an `ftp://` URL (scheme compared case-insensitively).
+fn is_ftp_url(url: &str) -> bool {
+    url.get(..6).is_some_and(|p| p.eq_ignore_ascii_case("ftp://"))
+}
+
 /// Some CDNs 403 a correct URL unless `Referer` matches their own site (seen on Bilibili's
 /// `bilivideo.com`); mirrors the host mapping in the client's `Thumbnails.refererFor`.
 fn referer_for(url: &str) -> Option<&'static str> {
@@ -715,18 +723,26 @@ impl LavSession {
     fn open(url: &str, w: usize, h: usize, start_micros: i64, hw_accel: u32) -> Result<LavSession> {
         init_ffmpeg()?;
 
-        let mut net_opts: Vec<(&str, String)> = vec![
-            ("user_agent", USER_AGENT.to_string()),
-            ("reconnect", "1".into()),
-            ("reconnect_streamed", "1".into()),
-            ("reconnect_delay_max", "10".into()),
-            ("reconnect_on_network_error", "1".into()),
-            ("reconnect_on_http_error", "5xx".into()),
-            ("rw_timeout", "15000000".into()),
-            ("recv_buffer_size", "4194304".into()),
-        ];
+        // An ftp:// input speaks none of the http protocol's options (FFmpeg rejects an option no
+        // protocol in the chain recognizes), and it must not be allowed to reach any other protocol.
+        let is_ftp = is_ftp_url(url);
 
-        if let Some(referer) = referer_for(url) {
+        let mut net_opts: Vec<(&str, String)> = if is_ftp {
+            vec![("rw_timeout", "15000000".into())]
+        } else {
+            vec![
+                ("user_agent", USER_AGENT.to_string()),
+                ("reconnect", "1".into()),
+                ("reconnect_streamed", "1".into()),
+                ("reconnect_delay_max", "10".into()),
+                ("reconnect_on_network_error", "1".into()),
+                ("reconnect_on_http_error", "5xx".into()),
+                ("rw_timeout", "15000000".into()),
+                ("recv_buffer_size", "4194304".into()),
+            ]
+        };
+
+        if !is_ftp && let Some(referer) = referer_for(url) {
             net_opts.push(("headers", format!("Referer: {referer}\r\n")));
         }
 
@@ -735,10 +751,14 @@ impl LavSession {
             opts.set(key, value);
         }
 
-        #[cfg(not(test))]
-        opts.set("protocol_whitelist", "https,tls,tcp,crypto,data,http");
-        #[cfg(test)]
-        opts.set("protocol_whitelist", "https,tls,tcp,crypto,data,http,file");
+        if is_ftp {
+            opts.set("protocol_whitelist", PROTOCOL_WHITELIST_FTP);
+        } else {
+            #[cfg(not(test))]
+            opts.set("protocol_whitelist", "https,tls,tcp,crypto,data,http");
+            #[cfg(test)]
+            opts.set("protocol_whitelist", "https,tls,tcp,crypto,data,http,file");
+        }
         opts.set("flags", "low_delay");
         opts.set("probesize", "524288");
         opts.set("analyzeduration", "500000");
@@ -1667,6 +1687,16 @@ unsafe extern "C" fn prefer_selected_hw_format(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ftp_urls_are_recognized_case_insensitively() {
+        assert!(super::is_ftp_url("ftp://host/a.mp4"));
+        assert!(super::is_ftp_url("FTP://host/a.mp4"));
+        assert!(!super::is_ftp_url("ftps://host/a.mp4"));
+        assert!(!super::is_ftp_url("https://host/ftp://a.mp4"));
+        assert!(!super::is_ftp_url("ft"));
+        assert!(!super::is_ftp_url("é://x"));
+    }
+
     use super::*;
 
     fn read_skipping_preview(

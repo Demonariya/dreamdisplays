@@ -9,6 +9,7 @@ import com.dreamdisplays.api.media.source.service.MediaResolverService
 import com.dreamdisplays.api.media.source.url.CustomMediaUrls
 import com.dreamdisplays.api.media.stream.model.MediaStream
 import com.dreamdisplays.api.media.stream.model.MediaStreamType
+import com.dreamdisplays.api.security.model.MediaFtpUrl
 import com.dreamdisplays.api.security.policy.MediaHosts
 import com.dreamdisplays.media.runtime.security.MediaHostGuard
 import com.dreamdisplays.util.net.DreamHttpClient
@@ -78,7 +79,7 @@ object DirectStreamResolver : MediaResolverService {
         val declaredKind = (source as? MediaSource.DirectStream)?.kind
             ?: CustomMediaUrls.classify(url)
         if (!declaredKind.isDirect && notDirect.getIfPresent(url) != null) {
-            throw DreamMediaException.NotFound("Not a direct media URL: $url.")
+            throw DreamMediaException.NotFound("Not a direct media URL: ${MediaFtpUrl.redact(url)}.")
         }
 
         // Walk the redirect chain through the SSRF guard first, so the probe (which follows no
@@ -92,7 +93,7 @@ object DirectStreamResolver : MediaResolverService {
                 )
             }
             notDirect.put(url, true)
-            throw DreamMediaException.NotFound("Not a direct media URL: $url.", e)
+            throw DreamMediaException.NotFound("Not a direct media URL: ${MediaFtpUrl.redact(url)}.", e)
         }
 
         // A host nobody vouched for has to prove what it serves: its headers are whatever it chose
@@ -107,10 +108,18 @@ object DirectStreamResolver : MediaResolverService {
                 throw DreamMediaException.Network("Could not reach this link. Check that it is public and still valid.")
             }
             notDirect.put(url, true)
-            throw DreamMediaException.NotFound("Not a direct media URL: $url.")
+            throw DreamMediaException.NotFound("Not a direct media URL: ${MediaFtpUrl.redact(url)}.")
         }
 
         val effectiveKind = effectiveKind(declaredKind, probe)
+
+        // FFmpeg's ftp protocol only serves one file. A playlist or manifest would pull its segments
+        // over whatever protocol they name, which the ftp-only whitelist rightly refuses.
+        if (MediaFtpUrl.isFtp(safeUrl) && effectiveKind.isManifest) {
+            throw DreamMediaException.NotFound(
+                "Playlists and manifests must be served over http(s); ftp:// works for plain video files.",
+            )
+        }
 
         // A refusal on a speculative Remote probe is a permanent fact about that URL, so record it
         // once: re-probing on every quality switch would tax every extractor video in the game.
@@ -206,7 +215,7 @@ object DirectStreamResolver : MediaResolverService {
         }
         logger.debug(
             "Direct file {}: type={} length={} ranges={} duration={}ns.",
-            originalUrl.take(120), probe.contentType, probe.contentLength, probe.acceptsRanges, durationNanos,
+            MediaFtpUrl.redact(originalUrl).take(120), probe.contentType, probe.contentLength, probe.acceptsRanges, durationNanos,
         )
         return ResolvedMedia(
             streams = listOf(muxedStream(probe.finalUrl)),

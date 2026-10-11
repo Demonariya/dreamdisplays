@@ -2,6 +2,7 @@ package com.dreamdisplays.api.media.source.url
 
 import com.dreamdisplays.api.Unstable
 import com.dreamdisplays.api.media.source.model.CustomMediaKind
+import com.dreamdisplays.api.security.model.MediaFtpUrl
 import com.dreamdisplays.api.security.model.MediaHttpUrl
 import java.net.URI
 import java.net.URLDecoder
@@ -42,7 +43,7 @@ object CustomMediaUrls {
     /** Google Drive file id: the opaque segment in `/file/d/<id>/` or the `id=` query parameter. */
     private val DRIVE_PATH_ID = Regex("/file/d/([A-Za-z0-9_-]{8,})")
 
-    /** Cleans and rewrites [raw] to playable HTTP(S) URL; applies wrappers, scheme, share-link rewrites. */
+    /** Cleans and rewrites [raw] to a playable HTTP(S) or FTP URL; applies wrappers, scheme, share-link rewrites. */
     fun normalize(raw: String): String? {
         var value = raw.trim().trim { it in WRAPPERS }.trim()
         if (value.isEmpty()) return null
@@ -57,7 +58,9 @@ object CustomMediaUrls {
             if (!value.contains('/') || !host.contains('.')) return null
             value = "https://$value"
         }
-        val parsed = MediaHttpUrl.parse(value) ?: return null
+        // `ftp://` links are taken as they are: they have no share pages to rewrite, and the stricter
+        // FTP rules (no query, no control characters once decoded) are enforced by the parser itself.
+        val parsed = MediaHttpUrl.parse(value) ?: return MediaFtpUrl.parse(value)?.value
         return rewriteShareLink(parsed.uri) ?: parsed.value
     }
 

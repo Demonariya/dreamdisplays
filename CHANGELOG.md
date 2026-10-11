@@ -13,6 +13,7 @@
 - Volume normalization
 - Support for Minecraft 26.3
 - Improved `/display` command suggestions
+- `ftp://` links to plain video files now play (no FTPS; playlists must use http(s))
 - `/display fullscreen` now works in command blocks and the server console
 - Simplified Chinese translation
 - Dropped packet protocol v1 support
@@ -138,6 +139,7 @@
 - Players without the mod can now join `Fabric` servers running `Dream Displays`
 - Volume normalization
 - Improved `/display` command suggestions
+- `ftp://` links to plain video files now play (no FTPS; playlists must use http(s))
 - `/display fullscreen` now works in command blocks and the server console
 - Fixed a crash on Minecraft 26.3 with `Improved Transparency` enabled
 - Fixed several display synchronization and playback issues

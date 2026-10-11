@@ -1,5 +1,6 @@
 package com.dreamdisplays.media.runtime.security
 
+import com.dreamdisplays.api.security.model.MediaFtpUrl
 import com.dreamdisplays.util.net.DreamHttpClient
 import com.github.benmanes.caffeine.cache.Cache
 import com.github.benmanes.caffeine.cache.Caffeine
@@ -76,7 +77,7 @@ object MediaHostGuard {
     fun isAllowed(url: String): Boolean {
         if (allowPrivate) return true
         val host = hostOf(url) ?: run {
-            logger.warn("Blocked media URL with no parseable host: ${url.take(120)}")
+            logger.warn("Blocked media URL with no parseable host: ${MediaFtpUrl.redact(url).take(120)}")
             return false
         }
         return hostVerdicts.get(host, ::resolvesToPublicAddresses)

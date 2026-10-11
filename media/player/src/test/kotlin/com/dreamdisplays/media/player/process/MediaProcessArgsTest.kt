@@ -88,4 +88,27 @@ class MediaProcessArgsTest {
             assertEquals(url, a.valueOf("-i"))
         }
     }
+
+    @Test
+    fun `an ftp input is limited to ftp and tcp and carries no http options`() {
+        val a = MediaProcess.inputCommand(
+            "FFMPEG", "ftp://bob:s%3Acr%40t@host/My%20Movies/a%2Bb.mp4", 10_000_000_000L,
+            HwAccelBackend.NONE, seekByDecoding = false, trimmed = null,
+        )
+        assertEquals("ftp,tcp", a.valueOf("-protocol_whitelist"))
+        httpOnly.forEach { assertFalse(it in a, "$it cannot be applied to an ftp input.") }
+        assertFalse("-multiple_requests" in a)
+        assertFalse("-tls_verify" in a)
+        // The path is handed over decoded (FFmpeg never decodes it); credentials stay encoded.
+        assertEquals("ftp://bob:s%3Acr%40t@host/My Movies/a+b.mp4", a.valueOf("-i"))
+        assertEquals("10.000000", a.valueOf("-ss"))
+    }
+
+    @Test
+    fun `an http input keeps its protocol whitelist`() {
+        assertEquals(
+            "https,tls,tcp,crypto,data,http,httpproxy",
+            args(0L, seekByDecoding = false).valueOf("-protocol_whitelist"),
+        )
+    }
 }
